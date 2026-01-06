@@ -1,22 +1,14 @@
 const std = @import("std");
 const math_in_terminal = @import("math_in_terminal");
 const fnct = @import("functions.zig");
+const ifnct = @import("input_functions.zig");
 pub fn main() !void {
-    var allocator = std.heap.page_allocator;
-    const expr = "2i * x + 2 + 3 + 82i";
-    const tokens = try fnct.tokenize(expr, &allocator);
-    const rpn = try fnct.toRPN(tokens, &allocator);
-    for (tokens) |t| {
-        std.debug.print(" {s}", .{t.text});
-    }
-    std.debug.print("\n", .{});
-    for (rpn) |t| {
-        std.debug.print(" {s}", .{t.text});
-    }
-    std.debug.print("\n", .{});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
 
-    const x_val = 1;
-    const result = try fnct.evalRPN(rpn, x_val);
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    std.debug.print("f({}) = {}\n", .{ x_val, result });
+    try ifnct.parseInput(args);
 }

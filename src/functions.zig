@@ -1,7 +1,40 @@
 const std = @import("std");
-const Complex = struct {
+pub const Complex = struct {
     re: f64,
     im: f64,
+    pub fn parseComplex(input_raw: []const u8) !Complex {
+        const input = std.mem.trim(u8, input_raw, " \t\n\r");
+
+        var real: f64 = 0;
+        var imag: f64 = 0;
+
+        if (std.mem.indexOfScalar(u8, input, 'i')) |i_pos| {
+            const before_i = input[0..i_pos];
+
+            if (std.mem.lastIndexOfAny(u8, before_i, "+-")) |sign_pos| {
+                if (sign_pos > 0) {
+                    real = try std.fmt.parseFloat(f64, before_i[0..sign_pos]);
+                }
+
+                const imag_part = before_i[sign_pos..];
+                if (imag_part.len == 1) {
+                    imag = if (imag_part[0] == '+') 1.0 else -1.0;
+                } else {
+                    imag = try std.fmt.parseFloat(f64, imag_part);
+                }
+            } else {
+                if (before_i.len == 0) {
+                    imag = 1.0;
+                } else {
+                    imag = try std.fmt.parseFloat(f64, before_i);
+                }
+            }
+        } else {
+            real = try std.fmt.parseFloat(f64, input);
+        }
+
+        return Complex{ .re = real, .im = imag };
+    }
 
     pub fn toString(self: Complex, allocator: std.mem.Allocator) ![]const u8 {
         return switch (self.imag) {
@@ -29,15 +62,18 @@ const Complex = struct {
             .im = (a.im * b.re - a.re * b.im) / denominator,
         };
     }
-    pub fn ln(a: Complex, b: Complex) Complex {
-        return Complex{ .re = std.math.log(f64, std.math.e, std.math.sqrt(a ^ 2 + b ^ 2)), .im = std.math.atan2(b, a) };
+    // pub fn ln(a: Complex) Complex {
+    //     return Complex{ .re = std.math.log(f64, std.math.e, std.math.sqrt(.re= std.math.pow(f64, a.re, 2)a.re ^ 2 + a.im ^ 2)), .im = std.math.atan2(a.im, a.re) };
+    // }
+    // pub fn exp(a: Complex) Complex {
+    //     const m = std.math.pow(f64, std.math.e, a);
+    //     return Complex{ .re = m * std.math.cos(a.im), .im = m * std.math.sin(a.im) };
+    // }
+    pub fn sin(a: Complex) Complex {
+        return Complex{ .re = std.math.sin(a.re) * std.math.cosh(a.im), .im = std.math.cos(a.re) * std.math.sinh(a.im) };
     }
-    pub fn exp(a: Complex, b: Complex) Complex {
-        const m = std.math.pow(f64, std.math.e, a);
-        return Complex{ .re = m * std.math.cos(b), .im = m * std.math.sin(b) };
-    }
-    pub fn sin(a: Complex, b: Complex) Complex {
-        return Complex{ .re = std.math.sin(a) * std.math.cosh(b), .im = std.math.cos(a) * std.math.sinh(b) };
+    pub fn cos(a: Complex) Complex {
+        return Complex{ .re = std.math.cos(a.re) * std.math.cosh(a.im), .im = -1 * std.math.sin(a.re) * std.math.sinh(a.im) };
     }
 };
 
@@ -57,8 +93,12 @@ pub fn tokenize(expr: []const u8, allocator: *std.mem.Allocator) ![]Token {
         if ((c >= '0' and c <= '9')) {
             const start = i;
             while (i + 1 < expr.len and ((expr[i + 1] >= '0' and expr[i + 1] <= '9') or expr[i + 1] == '.')) : (i += 1) {}
-            if (expr[i + 1] == 'i') {
-                try tokens.append(Token{ .kind = .Number, .text = expr[start .. i + 1], .isComplex = true });
+            if (i + 1 < expr.len and expr[i + 1] == 'i') {
+                try tokens.append(Token{
+                    .kind = .Number,
+                    .text = expr[start .. i + 1],
+                    .isComplex = true,
+                });
                 continue;
             }
             try tokens.append(Token{ .kind = .Number, .text = expr[start .. i + 1], .isComplex = false });
@@ -106,10 +146,6 @@ fn precedence(op: []const u8) u8 {
     return 0;
 }
 
-fn isRightAssociative(op: []const u8) bool {
-    return std.mem.eql(u8, op, "^");
-}
-
 pub fn toRPN(tokens: []const Token, allocator: *std.mem.Allocator) ![]Token {
     var output = std.ArrayList(Token).init(allocator.*);
     var stack = std.ArrayList(Token).init(allocator.*);
@@ -125,7 +161,7 @@ pub fn toRPN(tokens: []const Token, allocator: *std.mem.Allocator) ![]Token {
                     const top = stack.items[stack.items.len - 1];
                     if (top.kind == .Operator and
                         ((precedence(top.text) > precedence(t.text)) or
-                            (precedence(top.text) == precedence(t.text) and !isRightAssociative(t.text))))
+                            (precedence(top.text) == precedence(t.text) and !std.mem.eql(u8, t.text, "^"))))
                     {
                         const popped = stack.pop().?;
                         try output.append(popped);
@@ -161,7 +197,7 @@ pub fn toRPN(tokens: []const Token, allocator: *std.mem.Allocator) ![]Token {
     return output.toOwnedSlice();
 }
 
-pub fn evalRPN(rpn: []const Token, x_val: f64) !Complex {
+pub fn evalRPN(rpn: []const Token, x_val: Complex) !Complex {
     var stack: [128]Complex = undefined;
     var sp: usize = 0;
 
@@ -178,7 +214,7 @@ pub fn evalRPN(rpn: []const Token, x_val: f64) !Complex {
                 sp += 1;
             },
             .Variable => {
-                stack[sp] = Complex{ .re = x_val, .im = 0 };
+                stack[sp] = x_val;
                 sp += 1;
             },
             .Operator => {
@@ -197,27 +233,22 @@ pub fn evalRPN(rpn: []const Token, x_val: f64) !Complex {
                 stack[sp] = res;
                 sp += 1;
             },
-            // .Function => {
-            //     const arg = stack[sp - 1];
-            //     sp -= 1;
-            //     var res: f64 = 0;
-            //     if (std.mem.eql(u8, t.text, "sin")) res = std.math.sin(arg);
-            //     if (std.mem.eql(u8, t.text, "cos")) res = std.math.cos(arg);
-            //     stack[sp] = res;
-            //     sp += 1;
-            // },
-            // .Imaginary => {
-            //     if (sp > 0) {
-            //         const last = stack[sp - 1];
-            //         stack[sp - 1] = Complex{ .re = 0, .im = last.re };
-            //     } else {
-            //         stack[sp] = Complex{ .re = 0, .im = 1 };
-            //         sp += 1;
-            //     }
-            // },
+            .Function => {
+                const arg = stack[sp - 1];
+                sp -= 1;
+                var res: Complex = Complex{ .re = 0, .im = 0 };
+                if (std.mem.eql(u8, t.text, "sin")) res = Complex.sin(arg);
+                if (std.mem.eql(u8, t.text, "cos")) res = Complex.cos(arg);
+                // if (std.mem.eql(u8, t.text, "ln")) res = Complex.ln(arg);
+                // if (std.mem.eql(u8, t.text, "exp")) res = Complex.exp(arg);
+
+                stack[sp] = res;
+                sp += 1;
+            },
+
             else => {},
         }
-        std.debug.print("\n{any}", .{stack[sp]});
+        // std.debug.print("\n{any}", .{stack[sp]});
     }
 
     return stack[0];
@@ -226,18 +257,45 @@ pub fn evalRPN(rpn: []const Token, x_val: f64) !Complex {
 const Sequence = struct {
     formula: []const u8,
 
-    pub fn firstNumbers() ![]const f64 {}
-    // pub fn extractNumber(self: Sequence) Complex {
-    //     var form: ?[]f64 = null;
-    //     for (self.formula, 0..) |char, i| {
-    //         var x: ?f64 = null;
-    //         _ = char;
-    //         _ = i;
+    pub fn sum(self: Sequence, first: i64, last: i64) !Complex {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
 
-    //     }
-    // }
+        const alloc = arena.allocator();
+
+        const tokens = try tokenize(self.formula, alloc);
+        const rpn = try toRPN(tokens, alloc);
+
+        var s = Complex.zero();
+        for (first..last) |i| {
+            s = Complex.add(s, try evalRPN(rpn, i));
+        }
+        return s;
+    }
 };
 
-pub fn sum() f64 {
-    return (23);
-}
+const FunctionPoint = struct {
+    formula: []const u8,
+    x: Complex,
+    y: Complex,
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        formula: []const u8,
+        x: Complex,
+    ) !FunctionPoint {
+        const tokens = try tokenize(formula, allocator);
+        defer allocator.free(tokens);
+
+        const rpn = try toRPN(tokens, allocator);
+        defer allocator.free(rpn);
+
+        const y = try evalRPN(rpn, x);
+
+        return FunctionPoint{
+            .formula = formula,
+            .x = x,
+            .y = y,
+        };
+    }
+};
